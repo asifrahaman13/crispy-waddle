@@ -1,3 +1,5 @@
+import time
+import concurrent.futures
 import logging
 import os
 import json
@@ -7,7 +9,7 @@ from langchain_openai import ChatOpenAI
 from langchain.output_parsers import PydanticOutputParser
 from pydantic import BaseModel, Field
 
-open_ai_api_key=os.getenv("OPENAI_API_KEY")
+open_ai_api_key = os.getenv("OPENAI_API_KEY")
 assert open_ai_api_key, "Please set the OPENAI_API_KEY environment variable"
 
 # Configure logging
@@ -76,10 +78,12 @@ class SentimentAssistant:
         # Process the output
         return self.process_output(output)
 
+
 class MongoDBHandler:
     """
     A class to handle MongoDB operations.
     """
+
     def __init__(self, mongo_uri, db_name, collection_name):
         self.mongo_client = MongoClient(mongo_uri)
         self.db = self.mongo_client[db_name]
@@ -95,20 +99,20 @@ class MongoDBHandler:
 
 class AspectBasedSentimentAnalyzer:
     """
-    A class to analyze reviews using the Aspect-Based Sentiment Analysis model. 
+    A class to analyze reviews using the Aspect-Based Sentiment Analysis model.
     """
+
     def __init__(self, mongo_handler):
         self.mongo_handler = mongo_handler
-    
+
     # Analyze reviews from a file
     def analyze_reviews_from_file(self, input_file, output_file):
+        t1 = time.time()
         with open(input_file, "r") as file:
             reviews = [line.strip() for line in file if line.strip()]
-        
-        # Store the results
-        results = []
 
-        for review in reviews:
+        # Function to process each review
+        def process_review(review):
             try:
                 # Run the sentiment assistant
                 json_schema = SentimentAssistant().run_sentiment_assistant(review)
@@ -118,30 +122,49 @@ class AspectBasedSentimentAnalyzer:
                 json_schema["review"] = review
 
                 # Store the result in MongoDB
-                results.append(json_schema)
-
-                # Store the result in MongoDB
-                self.mongo_handler.store_in_mongodb(json_schema)  # Store the result in MongoDB
+                self.mongo_handler.store_in_mongodb(json_schema)
+                return json_schema
             except Exception as e:
                 logging.error("Failed to analyze the review: %s", e)
+                return None
 
+        # Use ThreadPoolExecutor to speed up the processing
+        num_cores = 6  # Number of cores available
+        results = []
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=num_cores) as executor:
+            future_to_review = {
+                executor.submit(process_review, review): review for review in reviews
+            }
+
+            # Iterate over the completed futures
+            for future in concurrent.futures.as_completed(future_to_review):
+
+                # Get the result from the future
+                result = future.result()
+
+                # Append the result to the results list
+                if result is not None:
+                    results.append(result)
+
+        # Optionally, save results to an output file
         with open(output_file, "w") as file:
-
-            # Write the results to the output file
             for result in results:
-                file.write(str(result) + "\n")
+                file.write(f"{result}\n")
+
+        print("Time taken to process the reviews: ", time.time() - t1)
 
 
 def main():
-    mongo_uri = os.getenv("MONGO_URI")  
-    db_name = "sentiment_analysis_db" 
-    collection_name = "reviews_analysis"  
-
+    mongo_uri = os.getenv("MONGO_URI")
+    db_name = "sentiment_analysis_db"
+    collection_name = "reviews_analysis"
     mongo_handler = MongoDBHandler(mongo_uri, db_name, collection_name)
     analyzer = AspectBasedSentimentAnalyzer(mongo_handler)
-    input_file = "src/input/reviews.txt" 
-    output_file = "src/output/output.txt" 
+    input_file = "src/input/reviews.txt"
+    output_file = "src/output/output.txt"
     analyzer.analyze_reviews_from_file(input_file, output_file)
+
 
 if __name__ == "__main__":
     main()
