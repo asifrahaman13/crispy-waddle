@@ -1,0 +1,13 @@
+{
+  "review": "The customer service was great, but the delivery was delayed by a week, which was frustrating.",
+  "features": [
+    {
+      "feature": "customer service",
+      "sentiment": "positive"
+    },
+    {
+      "feature": "delivery",
+      "sentiment": "negative"
+    }
+  ]
+}
